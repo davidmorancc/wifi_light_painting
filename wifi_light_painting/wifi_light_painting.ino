@@ -4,14 +4,11 @@
 
 const char* ssid        = "commdat";
 const char* password    = "0p3nm35h";
+const int LEDS          = 3;
 int rssi_max            = 0;
-int rssi_min            = 0;
-
-int auto_rssi_size      = 100;
-int auto_rssi[100];
-int auto_rssi_padding   = 6;
+int rssi_min            = 100;
 int rssi_previous       = 0;
-int auto_rssi_pointer   = 1;
+int cal_timer           = 500;
 
 #define PIN 4
 
@@ -22,11 +19,12 @@ int auto_rssi_pointer   = 1;
 //   NEO_KHZ400  400 KHz (classic 'v1' (not v2) FLORA pixels, WS2811 drivers)
 //   NEO_GRB     Pixels are wired for GRB bitstream (most NeoPixel products)
 //   NEO_RGB     Pixels are wired for RGB bitstream (v1 FLORA pixels, not v2)
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(2, PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(LEDS, PIN, NEO_GRB + NEO_KHZ800);
 
 WiFiUDP Udp;
 
 void setup() {
+  
   //setup serial port
   Serial.begin(115200);
   Serial.println("Booting...");
@@ -35,7 +33,7 @@ void setup() {
   Serial.println("LED Test...");
   strip.begin();
   strip.setBrightness(150);
-  strip_test(1);
+  strip_test(LEDS);
 
   //Connect to the wifi
   WiFi.mode(WIFI_STA);
@@ -53,17 +51,17 @@ void setup() {
 
 //basic led strip test
 void strip_test(int number_leds) {
-  for (int i = 0; i < number_leds; i++) {
-    strip.setPixelColor(number_leds, 255, 0, 0);
+  for (int i = 0; i < (number_leds); i++) {
+    strip.setPixelColor(i, 255, 0, 0);
     strip.show();
     delay(200);
-    strip.setPixelColor(number_leds, 0, 255, 0);
+    strip.setPixelColor(i, 0, 255, 0);
     strip.show();
     delay(200);
-    strip.setPixelColor(number_leds, 0, 0, 255);
+    strip.setPixelColor(i, 0, 0, 255);
     strip.show();
     delay(200);
-    strip.setPixelColor(number_leds, 0, 0, 0);
+    strip.setPixelColor(i, 0, 0, 0);
     strip.show();
   }
 }
@@ -84,40 +82,29 @@ int get_rssi() {
   return rssi;
 }
 
-void loop() {
-
-  int rssi = 0;
-  int rssi_in = 0;
-  
-  //get the strenght of the current network
-  rssi_in = get_rssi();
-  rssi = convert_rssi(rssi_in);
-  
-  //only update the strip if there's a change
-  if (rssi != rssi_previous) {
-    //strip.setBrightness(rssi);
-    strip.setPixelColor(0, rssi, 0, rssi);
-    strip.setPixelColor(1, rssi, 0, rssi);
-    
-    strip.show(); 
-
-    rssi_previous = rssi;
-    /* Testing */
-    Serial.println("Min/RSSI/Max//Convert " + String(rssi_min) + "/" +  String(abs(rssi_in)) + "/" + String(rssi_max) + "//" +  String(rssi));   
-  }
-  delay(150);
-}
-
 //Converts rssi from a neg number, runs the auto_rssi_minmax, reverses the direction, scales on 0-255 
 int convert_rssi(int rssi_in) {
   int rssi_out = 0;
 
   rssi_in = abs(rssi_in);
-  auto_rssi_minmax(rssi_in);
-  
+
+  //only run the scaling if the jumper is installed
+  if (cal_timer > 0) {
+    Serial.println("Calibrating..."+String(cal_timer));
+    rssi_minmax(rssi_in);
+    cal_timer--;
+  }
+    
   if (rssi_min != rssi_max) {
     //map function to scale the input to 0-255
     rssi_out = map(rssi_in, rssi_min, rssi_max, 0, 255);
+  }
+
+  //make sure it doesn't scale past the bounds since we can turn scaling off
+  if (rssi_in > rssi_max) {
+    rssi_out = 255;
+  } else if (rssi_min > rssi_in) {
+    rssi_out = 0;
   }
 
   //reverse the range
@@ -126,59 +113,53 @@ int convert_rssi(int rssi_in) {
     
 }
 
-//Function to find highest (maximum) value in array
-int get_maximum(int input[])
-{
-   int len = auto_rssi_size;    // sizeof(input);  // establish size of array
-   int max_value = input[1];    // start with max = first element
-
-   for(int i = 1; i<len; i++)
-   {
-      if(input[i] > max_value)
-            max_value = input[i];       
-   }
-   return max_value;                // return highest value in array
-}
-
-//Function to find lowest (minimum) value in array
-int get_minimum(int input[])
-{
-   int len = auto_rssi_size;    //sizeof(input);  // establish size of array
-   int min_value = input[1];    // start with min = first element
-
-   for(int i = 1; i<len; i++)
-   {
-      if(min_value > input[i] && input[i] > 0)
-            min_value = input[i];     
-   }
-   return min_value;    // return lowest value in array
-}
-
 //return the min and max given the current rssi
-void auto_rssi_minmax(int rssi_in) {
+void rssi_minmax(int rssi_in) {
   int rssi_diff = 0;
 
-  //adds the inputed var to the array
-  auto_rssi[auto_rssi_pointer] = rssi_in;
-
-  //set the global min and max based off of the array
-  rssi_min = get_minimum(auto_rssi);
-  rssi_max = get_maximum(auto_rssi);
-
-  //pads the min and max, gives a less sudden effects
-  if ((rssi_max-rssi_min)<auto_rssi_padding) {
-    rssi_diff = (auto_rssi_padding-(rssi_max-rssi_min))/2;
-    rssi_min = rssi_min - rssi_diff;
-    rssi_max = rssi_max + rssi_diff;
+  if (rssi_in > rssi_max) {
+    rssi_max = rssi_in;
   }
 
-  //Increment to pointer and reset once we get to top of the array
-  if (auto_rssi_pointer == auto_rssi_size) { 
-    auto_rssi_pointer = 1; 
-  } else {
-    auto_rssi_pointer++;
+  if (rssi_min > rssi_in) {
+    rssi_min = rssi_in;
   }
   
 }
 
+void loop() {
+
+  int rssi = 0;
+  int rssi_in = 0;
+  
+  //get the strenght of the current network
+  rssi_in = get_rssi();
+  rssi = convert_rssi(rssi_in);
+
+  //only update the strip if there's a change
+  if (rssi != rssi_previous) {
+    //strip.setBrightness(rssi);
+    for (int i = 0; i < LEDS; i++) {
+      strip.setPixelColor(i, 200, rssi, 0);
+      
+    }
+    
+    
+    //set led 0 red while we calibrate
+    if (cal_timer > 0) {
+      strip.setPixelColor(0, 255, 0, 0);
+      strip.setBrightness(100);
+      strip.show();
+    } else {
+      strip.setBrightness(100);
+       strip.show(); 
+    }
+
+    rssi_previous = rssi;
+    /* Testing */
+    Serial.println("Min/RSSI/Max//Convert " + String(rssi_min) + "/" +  String(abs(rssi_in)) + "/" + String(rssi_max) + "//" +  String(rssi));   
+  }
+  delay(150);
+  
+}
 
