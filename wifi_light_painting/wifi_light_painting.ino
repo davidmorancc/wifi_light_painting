@@ -2,8 +2,8 @@
 #include "ESP8266WiFi.h"
 #include <WiFiUdp.h>
 
-const char* ssid        = "commdat";
-const char* password    = "0p3nm35h";
+const char* ssid        = "xfinitywifi";
+const char* password    = "";
 const int LEDS          = 3;
 int rssi_max            = 0;
 int rssi_min            = 100;
